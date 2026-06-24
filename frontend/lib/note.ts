@@ -193,3 +193,21 @@ export async function markSpent(commitment: string, key: CryptoKey): Promise<voi
   if (!note) return;
   await saveNote({ ...note, spent: true }, key);
 }
+
+/** Encode a note as a base64 string for copy/paste sharing. */
+export function noteToString(note: Note): string {
+  return btoa(JSON.stringify(note, (_k, v) => (typeof v === "bigint" ? v.toString() + "n" : v)));
+}
+
+/** Parse a note from a base64 string or raw JSON string. Throws on invalid input. */
+export function loadFromString(input: string): Note {
+  try {
+    const json = input.trim().startsWith("{") ? input.trim() : atob(input.trim());
+    return JSON.parse(json, (_k, v) => {
+      if (typeof v === "string" && /^\d+n$/.test(v)) return BigInt(v.slice(0, -1));
+      return v;
+    }) as Note;
+  } catch {
+    throw new Error("Invalid note string. Paste the full note string or upload the JSON file.");
+  }
+}
