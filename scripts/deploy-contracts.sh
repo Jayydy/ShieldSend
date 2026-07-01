@@ -28,7 +28,7 @@ step()   { echo; green "▶ $*"; }
 step "Preflight checks"
 [[ -n "${DEPLOYER_SECRET:-}" ]] || { red "DEPLOYER_SECRET is not set"; exit 1; }
 
-for cmd in cargo soroban jq; do
+for cmd in cargo soroban; do
   command -v "$cmd" >/dev/null || { red "$cmd not found"; exit 1; }
 done
 
@@ -86,25 +86,7 @@ ASP_HASH=$(soroban contract upload \
   --network "$NETWORK")
 green "ASP hash: $ASP_HASH"
 
-# ── 4. Deploy ASP (pool init needs its address) ──────────────────────────────
-step "Deploying ASP contract"
-ASP_ID=$(soroban contract deploy \
-  --wasm-hash "$ASP_HASH" \
-  --source "$DEPLOYER_SECRET" \
-  --network "$NETWORK")
-green "ASP contract ID: $ASP_ID"
-
-# ── 5. Initialize ASP (placeholder pool address — updated in step 8) ─────────
-step "Initializing ASP"
-soroban contract invoke \
-  --id "$ASP_ID" \
-  --source "$DEPLOYER_SECRET" \
-  --network "$NETWORK" \
-  -- initialize \
-  --admin "$DEPLOYER_ADDRESS" \
-  --shield_pool "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
-
-# ── 6. Deploy ShieldPool ──────────────────────────────────────────────────────
+# ── 4. Deploy ShieldPool first so the ASP init can reference it ─────────────
 step "Deploying ShieldPool contract"
 SHIELD_POOL_ID=$(soroban contract deploy \
   --wasm-hash "$SHIELD_POOL_HASH" \
@@ -112,28 +94,37 @@ SHIELD_POOL_ID=$(soroban contract deploy \
   --network "$NETWORK")
 green "ShieldPool contract ID: $SHIELD_POOL_ID"
 
-# ── 7. Initialize ShieldPool ──────────────────────────────────────────────────
+# ── 5. Initialize ShieldPool ──────────────────────────────────────────────────
 step "Initializing ShieldPool"
 USDC_CONTRACT="${USDC_CONTRACT_ID:-$USDC_TESTNET}"
+SUPPORTED_ASSETS_JSON="[\"$USDC_CONTRACT\"]"
 soroban contract invoke \
   --id "$SHIELD_POOL_ID" \
   --source "$DEPLOYER_SECRET" \
   --network "$NETWORK" \
   -- initialize \
   --admin "$DEPLOYER_ADDRESS" \
-  --asp_contract "$ASP_ID" \
-  --supported_assets "[$USDC_CONTRACT]"
+  --supported_assets "$SUPPORTED_ASSETS_JSON"
 
-# ── 8. Update ASP with real ShieldPool address ────────────────────────────────
-step "Updating ASP with ShieldPool address"
+# ── 6. Deploy ASP ───────────────────────────────────────────────────────────
+step "Deploying ASP contract"
+ASP_ID=$(soroban contract deploy \
+  --wasm-hash "$ASP_HASH" \
+  --source "$DEPLOYER_SECRET" \
+  --network "$NETWORK")
+green "ASP contract ID: $ASP_ID"
+
+# ── 7. Initialize ASP with the real ShieldPool address ──────────────────────
+step "Initializing ASP"
 soroban contract invoke \
   --id "$ASP_ID" \
   --source "$DEPLOYER_SECRET" \
   --network "$NETWORK" \
-  -- set_shield_pool \
-  --pool "$SHIELD_POOL_ID"
+  -- initialize \
+  --admin "$DEPLOYER_ADDRESS" \
+  --shield_pool "$SHIELD_POOL_ID"
 
-# ── 9. Write .env.local ───────────────────────────────────────────────────────
+# ── 8. Write .env.local ───────────────────────────────────────────────────────
 step "Writing frontend/.env.local"
 mkdir -p "$(dirname "$ENV_FILE")"
 
